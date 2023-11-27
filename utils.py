@@ -19,25 +19,27 @@ import scipy.spatial
 # from scipy.spatial.distance import directed_hausdorff
 
 
-labels = {0: 'Background', 1: 'Foreground'}
+labels = {0: "Background", 1: "Foreground"}
 
 
 def computeDSC(pred, gt):
     dscAll = []
-    pdb.set_trace()
+    # pdb.set_trace()
     for i_b in range(pred.shape[0]):
-        pred_id = pred[i_b, 1, :]
-        gt_id = gt[i_b, 0, :]
-        dscAll.append(dc(pred_id.cpu().data.numpy(), gt_id.cpu().data.numpy()))
+        pred_id = pred[i_b, :, :]
+        gt_id = gt[i_b, :, :]
+        dscAll.append(dice_seg(pred_id, gt_id))
 
-    DSC = np.asarray(dscAll)
+    DSC = torch.Tensor(dscAll)
 
-    return DSC.mean()
+    return (DSC * torch.Tensor([0.5,0.25,0.25])).mean()
 
 
 def getImageImageList(imagesFolder):
     if os.path.exists(imagesFolder):
-        imageNames = [f for f in os.listdir(imagesFolder) if isfile(join(imagesFolder, f))]
+        imageNames = [
+            f for f in os.listdir(imagesFolder) if isfile(join(imagesFolder, f))
+        ]
 
     imageNames.sort()
 
@@ -83,8 +85,9 @@ def inference(net, img_batch, modelName, epoch):
 
     losses = []
     for i, data in enumerate(img_batch):
-
-        printProgressBar(i, total, prefix="[Inference] Getting segmentations...", length=30)
+        printProgressBar(
+            i, total, prefix="[Inference] Getting segmentations...", length=30
+        )
         images, labels, img_names = data
 
         images = to_var(images)
@@ -92,19 +95,28 @@ def inference(net, img_batch, modelName, epoch):
 
         net_predictions = net(images)
         segmentation_classes = getTargetSegmentation(labels)
+
         CE_loss_value = CE_loss(net_predictions, segmentation_classes)
         losses.append(CE_loss_value.cpu().data.numpy())
         pred_y = softMax(net_predictions)
         masks = torch.argmax(pred_y, dim=1)
 
-        path = os.path.join('./Results/Images/', modelName, str(epoch))
+        path = os.path.join("./Results/Images/", modelName, str(epoch))
 
         if not os.path.exists(path):
             os.makedirs(path)
 
         torchvision.utils.save_image(
-            torch.cat([images.data, labels.data, masks.view(labels.shape[0], 1, 256, 256).data / 3.0]),
-            os.path.join(path, str(i) + '.png'), padding=0)
+            torch.cat(
+                [
+                    images.data,
+                    labels.data,
+                    masks.view(labels.shape[0], 1, 256, 256).data / 3.0,
+                ]
+            ),
+            os.path.join(path, str(i) + ".png"),
+            padding=0,
+        )
 
     printProgressBar(total, total, done="[Inference] Segmentation Done !")
 
@@ -117,3 +129,71 @@ class MaskToTensor(object):
     def __call__(self, img):
         return torch.from_numpy(np.array(img, dtype=np.int32)).float()
 
+
+def batch_one_hot_encode(batch_segmentation_maps, num_classes):
+    """
+    Perform one-hot encoding on a batch of segmentation maps.
+
+    Args:
+    - batch_segmentation_maps (torch.Tensor): Batch of segmentation map tensors with class indices.
+      Shape: (batch_size, H, W)
+    - num_classes (int): Number of classes in the segmentation task.
+
+    Returns:
+    - torch.Tensor: Batch of one-hot encoded tensors.
+      Shape: (batch_size, num_classes, H, W)
+    """
+    # Ensure the batch_segmentation_maps is a PyTorch tensor
+    batch_segmentation_maps = torch.tensor(batch_segmentation_maps)
+
+    # Ensure the batch_segmentation_maps has the correct shape (batch_size, H, W)
+    if len(batch_segmentation_maps.shape) != 3:
+        raise ValueError(
+            "Batch segmentation maps should be a 3D tensor (batch_size, H, W)."
+        )
+
+    # Create a zero-filled tensor with dimensions (batch_size, num_classes, H, W)
+    batch_one_hot = torch.zeros(
+        (
+            batch_segmentation_maps.shape[0],
+            num_classes,
+            batch_segmentation_maps.shape[1],
+            batch_segmentation_maps.shape[2],
+        )
+    )
+
+    # Fill in the one-hot tensor based on class indices for each batch
+    for batch_idx in range(batch_segmentation_maps.shape[0]):
+        for class_idx in range(num_classes):
+            batch_one_hot[batch_idx, class_idx, :, :] = (
+                batch_segmentation_maps[batch_idx, :, :] == class_idx
+            ).float()
+
+    return to_var(batch_one_hot)
+
+
+def out_to_seg(img, num_classes):
+    out = torch.zeros((1, *img.shape[1:])).to(img.device)
+    for i, layer in enumerate(img):
+        out += layer * (i * 255 / (num_classes - 1))
+    return out
+
+
+def min_max_normalize(input_tensor):
+    min_value = input_tensor.min().item()
+    max_value = input_tensor.max().item()
+
+    # Normalize between 0 and 1
+    return (input_tensor - min_value) / (max_value - min_value)
+
+
+def dice_seg(masks, segmentation_classes):
+    DSC_image = []
+    for c_i in range(3):
+        DSC_image.append(
+            dc(
+                masks[c_i + 1].cpu().numpy(),
+                segmentation_classes[c_i + 1].cpu().numpy(),
+            )
+        )
+    return DSC_image

@@ -1,7 +1,6 @@
 import torch.nn.init as init
 import torch.nn.functional as F
 import math
-
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -20,12 +19,16 @@ def initialize_weights(*models):
 
 
 class _EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, dropout=False):
+    def __init__(self, in_channels, out_channels, dropout=False, activation = nn.PReLU):
         super(_EncoderBlock, self).__init__()
         layers = [
             nn.Conv2d(in_channels, out_channels, kernel_size=3),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
+            activation(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            activation(),
+            
         ]
         if dropout:
             layers.append(nn.Dropout())
@@ -37,12 +40,12 @@ class _EncoderBlock(nn.Module):
 
 
 class _DecoderBlock(nn.Module):
-    def __init__(self, in_channels, middle_channels, out_channels):
+    def __init__(self, in_channels, middle_channels, out_channels, activation=nn.PReLU):
         super(_DecoderBlock, self).__init__()
         self.decode = nn.Sequential(
             nn.Conv2d(in_channels, middle_channels, kernel_size=3),
             nn.BatchNorm2d(middle_channels),
-            nn.ReLU(inplace=True),
+            activation(),
             nn.ConvTranspose2d(middle_channels, out_channels, kernel_size=2, stride=2),
         )
 
@@ -51,25 +54,34 @@ class _DecoderBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, activation=nn.PReLU):
         super(UNet, self).__init__()
-        self.enc1 = _EncoderBlock(1, 16)
-        self.enc2 = _EncoderBlock(16, 32)
-        self.enc3 = _EncoderBlock(32, 64)
-        self.enc4 = _EncoderBlock(64, 128, dropout=True)
-        self.center = _DecoderBlock(128, 256, 128)
-        self.dec4 = _DecoderBlock(256, 128, 64)
-        self.dec3 = _DecoderBlock(128, 64, 32)
-        self.dec2 = _DecoderBlock(64, 32, 16)
+        self.pretraining = False
+        self.enc1 = _EncoderBlock(1, 32, activation=activation)
+        self.enc2 = _EncoderBlock(32, 64, activation=activation)
+        self.enc3 = _EncoderBlock(64, 128, activation=activation)
+        self.enc4 = _EncoderBlock(128, 256, activation=activation)
+        # self.enc5 = _EncoderBlock(128, 256, activation=activation, dropout=True)
+
+
+        self.center = _DecoderBlock(256, 512, 256, activation=activation)
+
+        # self.dec5 = _DecoderBlock(512, 256, 128, activation=activation)
+        self.dec4 = _DecoderBlock(512, 256, 128, activation=activation)
+        self.dec3 = _DecoderBlock(256, 128, 64, activation=activation)
+        self.dec2 = _DecoderBlock(128, 64, 32, activation=activation)
         self.dec1 = nn.Sequential(
+            nn.Conv2d(64, 32, kernel_size=3),
+            nn.BatchNorm2d(32),
+            activation(),
             nn.Conv2d(32, 16, kernel_size=3),
             nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 16, kernel_size=3),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
+            activation(),
         )
         self.final = nn.Conv2d(16, num_classes, kernel_size=1)
+
+      
+
         initialize_weights(self)
 
     def forward(self, x):
@@ -77,7 +89,9 @@ class UNet(nn.Module):
         enc2 = self.enc2(enc1)
         enc3 = self.enc3(enc2)
         enc4 = self.enc4(enc3)
+        # enc5 = self.enc5(enc4)
         center = self.center(enc4)
+        # dec5 = self.dec5(torch.cat([center, F.upsample(enc5, center.size()[2:], mode='bilinear')], 1))
         dec4 = self.dec4(torch.cat([center, F.upsample(enc4, center.size()[2:], mode='bilinear')], 1))
         dec3 = self.dec3(torch.cat([dec4, F.upsample(enc3, dec4.size()[2:], mode='bilinear')], 1))
         dec2 = self.dec2(torch.cat([dec3, F.upsample(enc2, dec3.size()[2:], mode='bilinear')], 1))
@@ -85,3 +99,28 @@ class UNet(nn.Module):
         final = self.final(dec1)
 
         return F.upsample(final, x.size()[2:], mode='bilinear')
+
+
+class SegNet(nn.Module):
+    def __init__(self):
+        super(SegNet, self).__init__()
+
+        self.enc1 = _EncoderBlock(1, 32)
+        self.enc2 = _EncoderBlock(32, 64)
+        self.enc3 = _EncoderBlock(64, 128)
+        self.enc4 = _EncoderBlock(128, 256)
+        self.enc5 = _EncoderBlock(256, 512, dropout=True)
+        self.enc6 = _EncoderBlock(512, 1024, dropout=True)
+
+        self.fc = nn.Conv2d(1024,1,(2,2))
+        self.logit = nn.Sigmoid()
+    
+    def forward(self, x):
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(enc1)
+        enc3 = self.enc3(enc2)
+        enc4 = self.enc4(enc3)
+        enc5 = self.enc5(enc4)
+        enc6 = self.enc6(enc5)
+        fc = self.fc(enc6)
+        return self.logit(fc[:,0,0,0])
