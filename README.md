@@ -8,7 +8,9 @@
 Required modules:
 ```bash
 torch
+torchvision
 numpy==1.24
+pandas
 scikit-image
 medpy
 ```
