@@ -1,0 +1,14 @@
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) libfabric/1.10.1     2) openmpi/4.0.3     3) ucx/1.8.0
+
+GPU 0: Tesla V100-SXM2-16GB (UUID: GPU-f8f2cc25-538c-d16c-ab5d-8b5e921c5d81)
+	 Link 0: 25.781 GB/s
+	 Link 1: 25.781 GB/s
+	 Link 2: 25.781 GB/s
+	 Link 3: 25.781 GB/s
+	 Link 4: 25.781 GB/s
+	 Link 5: 25.781 GB/s
+Looking in links: /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2020/avx512, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo/avx512, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2020/avx2, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo/avx2, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2020/generic, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo/generic, /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic
+Processing /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2020/generic/numpy-1.25.2+computecanada-cp310-cp310-linux_x86_64.whl
+Installing collected packages: numpy

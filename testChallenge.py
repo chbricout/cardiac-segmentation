@@ -64,7 +64,7 @@ def runTesting(args):
         transforms.ToTensor()
     ])
 
-    test_set = medicalDataLoader.MedicalImageDataset('val',
+    test_set = medicalDataLoader.MedicalImageDataset('train',
                                                     root_dir,
                                                     transform=transform,
                                                     mask_transform=mask_transform,

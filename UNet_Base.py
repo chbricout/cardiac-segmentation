@@ -19,14 +19,14 @@ def initialize_weights(*models):
 
 
 class _EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, dropout=False, activation = nn.PReLU):
+    def __init__(self, in_channels, out_channels, dropout=False, activation = nn.PReLU, batch_norm=True):
         super(_EncoderBlock, self).__init__()
         layers = [
             nn.Conv2d(in_channels, out_channels, kernel_size=3),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels) if batch_norm else nn.Identity(),
             activation(),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels) if batch_norm else nn.Identity() ,
             activation(),
             
         ]
@@ -44,6 +44,9 @@ class _DecoderBlock(nn.Module):
         super(_DecoderBlock, self).__init__()
         self.decode = nn.Sequential(
             nn.Conv2d(in_channels, middle_channels, kernel_size=3),
+            nn.BatchNorm2d(middle_channels) ,
+            activation(),
+            nn.Conv2d(middle_channels   , middle_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(middle_channels),
             activation(),
             nn.ConvTranspose2d(middle_channels, out_channels, kernel_size=2, stride=2),
@@ -105,12 +108,12 @@ class SegNet(nn.Module):
     def __init__(self):
         super(SegNet, self).__init__()
 
-        self.enc1 = _EncoderBlock(1, 32)
-        self.enc2 = _EncoderBlock(32, 64)
-        self.enc3 = _EncoderBlock(64, 128)
-        self.enc4 = _EncoderBlock(128, 256)
-        self.enc5 = _EncoderBlock(256, 512, dropout=True)
-        self.enc6 = _EncoderBlock(512, 1024, dropout=True)
+        self.enc1 = _EncoderBlock(1, 32, batch_norm=False)
+        self.enc2 = _EncoderBlock(32, 64, batch_norm=True)
+        self.enc3 = _EncoderBlock(64, 128, batch_norm=True)
+        self.enc4 = _EncoderBlock(128, 256, batch_norm=True)
+        self.enc5 = _EncoderBlock(256, 512, dropout=True, batch_norm=True)
+        self.enc6 = _EncoderBlock(512, 1024, dropout=True, batch_norm=False)
 
         self.fc = nn.Conv2d(1024,1,(2,2))
         self.logit = nn.Sigmoid()

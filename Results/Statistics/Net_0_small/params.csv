@@ -1,0 +1,2 @@
+,learning_rate,learning_rate_discriminator,learning_rate_unsupervised,epochs,lambda_c1_dice,lambda_c2_dice,lambda_supervised_prop,lambda_prop_unsup,batch_size,batch_size_unsupervised
+0,0.0005,0.0001,5e-08,1001,0,0,6,6,32,32

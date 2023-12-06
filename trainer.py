@@ -24,89 +24,6 @@ from numpy import isnan
 from scipy.ndimage import binary_closing, binary_dilation
 
 
-def pretrain_autoencode(net: UNet, dataloader, epoch, optimizer):
-    logging.info("~~~~~~~~~~~ Starting the pre-training ~~~~~~~~~~")
-    net.pretraining = True
-
-    ## START THE PRE TRAINING
-    MSELoss = torch.nn.MSELoss(reduction="sum").cuda()
-    ## FOR EACH EPOCH
-    for i in range(epoch):
-        net.train()
-        lossEpoch = []
-        num_batches = len(dataloader)
-
-        ## FOR EACH BATCH
-        for j, data in enumerate(dataloader):
-            ### Set to zero all the gradients
-            net.zero_grad()
-            optimizer.zero_grad()
-
-            ## GET IMAGES, LABELS and IMG NAMES
-            images, erased_image, img_names = data
-
-            ### From numpy to torch variables
-            images = to_var(images)
-            erased_image = to_var(erased_image)
-            ################### Train ###################
-            # -- The CNN makes its predictions (forward pass)
-            net_predictions = net(erased_image)
-            # -- Compute the losses --#
-            # THIS FUNCTION IS TO CONVERT LABELS TO A FORMAT TO BE USED IN THIS CODE
-            # COMPUTE THE LOSS
-            lossTotal = MSELoss(
-                net_predictions, images
-            )  # XXXXXX and YYYYYYY are your inputs for the CE
-
-            # DO THE STEPS FOR BACKPROP (two things to be done in pytorch)
-            lossTotal.backward()
-            optimizer.step()
-            # THIS IS JUST TO VISUALIZE THE TRAINING
-            lossEpoch.append(lossTotal.cpu().data.numpy())
-            printProgressBar(
-                j + 1,
-                num_batches,
-                prefix="[Pre-training] Epoch: {} ".format(i),
-                length=15,
-                suffix=" Loss: {:.4f}, ".format(lossTotal),
-            )
-
-        lossEpoch = np.asarray(lossEpoch)
-        lossEpoch = lossEpoch.mean()
-
-        printProgressBar(
-            num_batches,
-            num_batches,
-            done="[Pre-training] Epoch: {}, LossG: {:.4f}".format(i, lossEpoch),
-        )
-    for image, erased, net_pred in zip(
-        images.detach().cpu(),
-        erased_image.detach().cpu(),
-        net_predictions.detach().cpu(),
-    ):
-        fig, plots = plt.subplots(1, 3)
-        plots[0].imshow(erased[0], cmap="gray")
-        plots[0].set_title("erased image")
-
-        plots[1].imshow(net_pred[0], cmap="gray")
-        plots[1].set_title("Reconstruction")
-
-        plots[2].imshow(image[0], cmap="gray")
-        plots[2].set_title("GT")
-
-        plt.show()
-    net.pretraining = False
-
-    return net
-
-
-def prop_diff(segmentations, props):
-    element_by_layers = segmentations.sum(dim=(2, 3))
-    prob_by_layer = element_by_layers / (element_by_layers.sum())
-    piecewise_diff = prob_by_layer - props.to(prob_by_layer.device)
-    diff_sq = torch.pow(piecewise_diff, 2)
-    return diff_sq.sum()
-
 
 def prop_by_layer(segmentations):
     element_by_layers = segmentations.sum(dim=(2, 3))
@@ -114,41 +31,6 @@ def prop_by_layer(segmentations):
     return props + 1e-9
 
 
-def get_grav_center_by_class(batch_segmentations):
-    batch_coord = []
-    for segmentations in batch_segmentations:
-        coord = []
-        if (
-            (segmentations[3] != 0).sum() > 1
-            and (segmentations[2] != 0).sum() > 1
-            and (segmentations[1] != 0).sum() > 1
-        ):
-            for seg in segmentations:
-                grid_x, grid_y = torch.meshgrid(
-                    torch.arange(seg.shape[1]), torch.arange(seg.shape[0])
-                )
-
-                flat_grid_x = grid_x.flatten().float().to(segmentations.device)
-                flat_grid_y = grid_y.flatten().float().to(segmentations.device)
-                flat_probabilities = seg.flatten()
-
-                center_x = torch.sum(flat_grid_x * flat_probabilities) / torch.sum(
-                    flat_probabilities
-                )
-                center_y = torch.sum(flat_grid_y * flat_probabilities) / torch.sum(
-                    flat_probabilities
-                )
-                coord.append([center_x, center_y])
-            batch_coord.append(coord)
-    return torch.Tensor(batch_coord).to(segmentations.device)
-
-
-def grav_center_loss(batch_segmentations):
-    center_by_classe = get_grav_center_by_class(batch_segmentations)
-    bet_2_3 = 0
-    if len(center_by_classe.shape) == 3:
-        bet_2_3 = torch.pow(center_by_classe[:, 3] - center_by_classe[:, 2], 2).mean()
-    return bet_2_3
 
 def get_parameters(id: int, *params: List[List[any]]):
     div = 1
@@ -183,10 +65,10 @@ def runTraining(job_id=0):
     lr_d = 1e-4
     u_lr = 5e-8
     epoch = 1001  # Number of epochs
-    pho = 0.1
+    pho = 0 # 0.1
     lambda_c1_dice = 0
     lambda_c2_dice = 0
-    lambda_supervised_prop = 6
+    lambda_supervised_prop =  6
     lambda_prop_unsup = 6
 
     param_df = pd.DataFrame(
@@ -215,6 +97,7 @@ def runTraining(job_id=0):
             'batch_size_unsupervised',
         ],
     )
+    test_metrics =[]
     root_dir = "./Data/"
 
     logging.info(" Dataset: {} ".format(root_dir))
@@ -273,7 +156,7 @@ def runTraining(job_id=0):
     num_classes = 4  # NUMBER OF CLASSES
 
     logging.info("~~~~~~~~~~~ Creating the UNet model ~~~~~~~~~~")
-    modelName = f"Net_{job_id}_small"
+    modelName = f"Net_with_no_lagrange"
     logging.info(" Model Name: {}".format(modelName))
 
     # CREATION OF YOUR MODEL
@@ -335,7 +218,7 @@ def runTraining(job_id=0):
         ## FOR EACH BATCH
         for j, data in enumerate(train_loader_full):
             ## GET IMAGES, LABELS and IMG NAMES
-            images, labels, out_el, img_names = data
+            images, labels, img_names = data
             ### From numpy to torch variables
             labels = to_var(labels)
             images = to_var(images)
@@ -376,18 +259,18 @@ def runTraining(job_id=0):
                 net_predictions, segmentation_classes
             )  # XXXXXX and YYYYYYY are your inputs for the CE
 
-            # DICE
-            c1_label = torch.zeros_like(segmentation_classes)
-            c1_label[segmentation_classes == 1] = 1
-            num = (net_predictions[:, 1] * c1_label).sum()
-            den = (net_predictions[:, 1] + c1_label).sum()
-            c1_dice_loss = 1.0 - (2 * num + 1) / (den + 1)
+            # # DICE
+            # c1_label = torch.zeros_like(segmentation_classes)
+            # c1_label[segmentation_classes == 1] = 1
+            # num = (net_predictions[:, 1] * c1_label).sum()
+            # den = (net_predictions[:, 1] + c1_label).sum()
+            # c1_dice_loss = 1.0 - (2 * num + 1) / (den + 1)
 
-            c2_label = torch.zeros_like(segmentation_classes)
-            c2_label[segmentation_classes == 3] = 1
-            num = (net_predictions[:, 2] * c2_label).sum()
-            den = (net_predictions[:, 2] + c2_label).sum()
-            c2_dice_loss = 1.0 - (2 * num + 1) / (den + 1)
+            # c2_label = torch.zeros_like(segmentation_classes)
+            # c2_label[segmentation_classes == 3] = 1
+            # num = (net_predictions[:, 2] * c2_label).sum()
+            # den = (net_predictions[:, 2] + c2_label).sum()
+            # c2_dice_loss = 1.0 - (2 * num + 1) / (den + 1)
 
             # kl = torch.nn.functional.kl_div(torch.log(prop_by_layer(ceil_pred)), stat_prior,  reduction='batchmean')
             prop_diff_value = torch.pow(
@@ -407,7 +290,7 @@ def runTraining(job_id=0):
             # likely_loss = discNet(sum_pred)
 
             # DO THE STEPS FOR BACKPROP (two things to be done in pytorch)
-            if (i-1)%8==0:
+            if (i-1)%8==0 and False:
                 lambda_supervised_prop = phr(prop_diff_value.detach(), pho, lambda_supervised_prop)
                 # lambda_c1_dice = phr(c1_dice_loss.detach(), pho, lambda_c1_dice)
                 # lambda_c2_dice = phr(c2_dice_loss.detach(), pho, lambda_c2_dice)
@@ -424,12 +307,11 @@ def runTraining(job_id=0):
                 num_batches,
                 prefix="[Training] Epoch: {} ".format(i),
                 length=15,
-                suffix=" Loss: {:.4f}, prop diff : {:.4f}, dice: {:.4f}, gan : {:.4f}, lambda supervised : {:.4f}, lambda c1 : {:.4f}, lambda c2 : {:.4f}".format(
+                suffix=" Loss: {:.4f}, prop diff : {:.4f}, gan : {:.4f}, lambda supervised : {:.4f}".format(
                     lossTotal,
                     prop_diff_value,
-                    c1_dice_loss,
                     loss_bce_fake + loss_bce_real,
-                    lambda_supervised_prop, lambda_c1_dice, lambda_c2_dice
+                    lambda_supervised_prop
                 ),
             )
             # print(f" Dice ={computeDSC(net_predictions, segmentation_classes)} ")
@@ -466,13 +348,14 @@ def runTraining(job_id=0):
 
             lossTotal = lambda_prop_unsup * prop_diff_value
 
-            if i >= 30:
+            if i >= 2:
                 for c_i in range(4):
                     ceil_pred_for_disc[:, c_i] *= c_i
                 sum_pred = ceil_pred_for_disc.sum(axis=1, keepdim=True)
                 likely_loss = discNet(sum_pred)
-                lossTotal +=  likely_loss.mean()
-                if (i-1)%8==0:
+                lossTotal = likely_loss.sum()
+                # lossTotal +=  BCE_loss(likely_loss, label_gt[:likely_loss.shape[0]])
+                if (i-1)%8==0  and False:
                     lambda_prop_unsup = phr(prop_diff_value.detach().mean(), pho, lambda_prop_unsup)
 
             # DO THE STEPS FOR BACKPROP (two things to be done in pytorch)
@@ -507,6 +390,7 @@ def runTraining(job_id=0):
                 net.state_dict(), "./models/" + modelName + "/" + str(i) + "_Epoch"
             )
             logging.info("~~~~~~~~~~~ Starting the testing ~~~~~~~~~~")
+            inf = inferenceTest(net, val_loader, modelName + "/" + str(i) + "_Epoch")
             [
                 DSC1,
                 DSC1s,
@@ -526,7 +410,8 @@ def runTraining(job_id=0):
                 ASD2s,
                 ASD3,
                 ASD3s,
-            ] = inferenceTest(net, val_loader, modelName + "/" + str(i) + "_Epoch")
+            ]=inf
+
             logging.info(
                 "###                                                       ###"
             )
@@ -572,11 +457,31 @@ def runTraining(job_id=0):
             logging.info(
                 "###                                                       ###"
             )
+            test_metrics.append(inf)
 
         if i == epoch - 1:
             torch.save(
                 net.state_dict(), "./models/" + modelName + "/" + str(i) + "_Epoch"
             )
+            df= pd.DataFrame(test_metrics, index=[i for i in range(0,epoch, 10)], columns=["DSC1",
+                "DSC1s",
+                "DSC2",
+                "DSC2s",
+                "DSC3",
+                "DSC3s",
+                "HD1",
+                "HD1s",
+                "HD2",
+                "HD2s",
+                "HD3",
+                "HD3s",
+                "ASD1",
+                "ASD1s",
+                "ASD2",
+                "ASD2s",
+                "ASD3",
+                "ASD3s",])
+            df.to_csv(os.path.join(directory, "metrics.csv"))
 
         np.save(os.path.join(directory, "Losses.npy"), lossTotalTraining)
     return net
