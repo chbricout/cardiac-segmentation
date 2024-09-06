@@ -1,4 +1,4 @@
-# MTI865 challenge
+# MTI865 Cardiac Segmentation challenge
 - Charles Bricout
 - Enzo Di Maria
 - Aymen Maache
